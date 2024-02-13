@@ -1,8 +1,48 @@
 import numpy as np
 import pickle
 
-def sigmoid(x):
-  return 1.0 / (1.0 + np.exp(-x))
+
+class SigmoidActivation:
+  @staticmethod
+  def function(z):
+    return 1.0 / (1.0 + np.exp(-z))
+  
+  @staticmethod
+  def derivative(z):
+    return SigmoidActivation.function(z) * (1.0 - SigmoidActivation.function(z))
+
+
+class SoftmaxActivation:
+  @staticmethod
+  def function(z):
+    scaled_z = z - np.max(z) # This is done to avoid e(z) to numerically explode
+    return np.exp(scaled_z) / sum(np.exp(scaled_z))
+  
+  @staticmethod
+  def derivative(z):
+    I = np.eye(z.shape[0])
+    return SoftmaxActivation.function(z) * (I - SoftmaxActivation.function(z).T)
+
+
+class QuadraticLoss:
+  @staticmethod
+  def function(a, y):
+    return 0.5*np.linalg.norm(a-y)**2
+
+  @staticmethod
+  def derivative(a, y):
+    return a - y
+
+
+class CrossEntropyLoss:
+  @staticmethod
+  def function(a, y):
+    return -np.sum(y * np.log(a))
+
+  @staticmethod
+  def derivative(a, y):
+    return -y / a
+
 
 class Layer:
   def __init__(self, size, activation_function=None):
@@ -13,42 +53,131 @@ class Layer:
     self.weights = None
     self.biases = None
   
-  def activate(self, activations):
-    return self.activation_function(np.dot(self.weights, activations) + self.biases)
+
+  def activate(self, activations, with_weighted_inputs=False):
+    if with_weighted_inputs:
+      weighted_inputs = np.dot(self.weights, activations) + self.biases
+      return (self.activation_function.function(weighted_inputs), weighted_inputs)
+    return self.activation_function.function(np.dot(self.weights, activations) + self.biases)
+
 
   def __repr__(self):
     return f"Layer({self.size}, {self.activation_function}) :\nweights:\n{self.weights}\nbiases:\n{self.biases}\n"
 
+
 class FeedForwardModel:
-  def __init__(self, layers):
+  def __init__(self, layers, cost_function):
     # Initialize layer weights and biases using normal distribution
     for i, layer in enumerate(layers[1:]):
       layer.weights = np.random.randn(layer.size, layers[i].size)
       layer.biases = np.random.randn(layer.size, 1)
     # Store them in the model
     self.layers = layers
+    self.cost_function = cost_function
 
-  def fit(self, data_train, cost_function, learning_rate=0.01, batch_size=8, epochs=100):
-    # for epoch in range(epochs):
-    #   # for each example in the batch
-    #     # run the model:
-    #     # for each layer
-    #       # compute a(i+1) = activation(w * a(i) + b)
-    #     # evaluate the cost (using binary cross entropy error function)
-    #     # compute backpropagation for the example:
-    #     # for each layer
-    #       # 
-    #   # compute the average of adjustments of each parameter
-    #   # nudge the model parameters using them 
-      pass
 
   def feedforward(self, input_activations):
     activations = input_activations
-    print(f"activations: {activations}")
     for i, layer in enumerate(self.layers[1:]):
       activations = layer.activate(activations)
-      print(f"activations: {activations}")
     return activations
+
+
+  def stochastic_gradient_descent(self, training_data, validation_data=None, learning_rate=0.01, batch_size=8, epochs=100):
+    for _ in range(epochs):
+      # Prepare batches
+      inputs, outputs = training_data
+      n_examples = len(inputs)
+      permutation_indices = np.random.permutation(n_examples)
+      inputs = inputs[permutation_indices]
+      outputs = outputs[permutation_indices]
+      batches = [(inputs[i:i+batch_size], outputs[i:i+batch_size]) for i in range(0, n_examples, batch_size)]
+
+      # Apply stochastic batch gradient descent using backpropagation for each batch
+      for batch in batches:
+        self.gradient_descent(batch, learning_rate)
+
+      # Validate model
+      if validation_data:
+        self.validate(validation_data)
+
+  def gradient_descent(self, training_data, learning_rate, validation_data=None, epochs=1):
+    for _ in range(epochs):
+      # Initialize accumulators to store estimated gradients
+      weigths_gradients_accumulators = [np.zeros(layer.weights.shape) for layer in self.layers[1:]]
+      biases_gradients_accumulators = [np.zeros(layer.biases.shape) for layer in self.layers[1:]]
+
+      # Compute and accumulate gradients deltas for each example in the training_data
+      for example in zip(*training_data):
+        # Compute gradients deltas
+        weights_gradients_deltas, biases_gradients_deltas = self.backpropagate(example)
+
+        # Accumulate gradients
+        for weights_gradients_accumulator, weights_gradients_delta in zip(weigths_gradients_accumulators, weights_gradients_deltas):
+          weights_gradients_accumulator += weights_gradients_delta
+        for biases_gradients_accumulator, biases_gradients_delta in zip(weigths_gradients_accumulators, biases_gradients_deltas):
+          biases_gradients_accumulator += biases_gradients_delta
+        
+        example_input, example_result = example
+        example_input = example_input.reshape(len(example_input), 1)
+        example_result = example_result.reshape(len(example_result), 1)
+        print(self.cost_function.function(self.feedforward(example_input), example_result))
+
+      # Update weights and biases based on gradients
+      for layer, weights_gradients, biases_gradients in zip(self.layers[1:], weigths_gradients_accumulators, biases_gradients_accumulators):
+        scaled_learning_rate = learning_rate / len(training_data)
+        layer.weights -= weights_gradients * scaled_learning_rate
+        layer.biases -= biases_gradients * scaled_learning_rate
+      
+      # Validate model
+      if validation_data:
+        self.validate(validation_data)
+
+
+  def backpropagate(self, example):
+    # Initialized gradients
+    example_input, example_result = example
+    example_input = example_input.reshape(len(example_input), 1)
+    example_result = example_result.reshape(len(example_result), 1)
+    # print(f"example_input: {example_input}")
+    # print(f"example_result: {example_result}")
+    weights_gradients_deltas = [np.zeros(layer.weights.shape) for layer in self.layers[1:]]
+    biases_gradients_deltas = [np.zeros(layer.biases.shape) for layer in self.layers[1:]]
+
+    # Forward pass
+    activations = example_input
+    activations_per_layer = [activations] # activation cache for each layer
+    weighted_inputs_per_layer = [] # weighted inputs cache for each non-input layer
+    for layer in self.layers[1:]:
+      # Activate each layer and cache the activation and weighted inputs 
+      activations, weighted_inputs = layer.activate(activations, with_weighted_inputs=True)
+      activations_per_layer.append(activations)
+      weighted_inputs_per_layer.append(weighted_inputs)
+
+
+    # Backward pass
+    delta = self.cost_function.derivative(activations_per_layer[-1], example_result)
+    # print(f"delta shape before: {delta.shape}")
+    # print(f"last activation derivative shape{self.layers[-1].activation_function.derivative(weighted_inputs_per_layer[-1]).shape}")
+    output_dadz = self.layers[-1].activation_function.derivative(weighted_inputs_per_layer[-1])
+    if output_dadz.shape[1] == 1:
+      delta *= output_dadz
+    else:
+      delta = np.sum(delta * output_dadz, axis=0).reshape(-1,1)
+    # print(f"delta shape: {delta.shape}")
+    weights_gradients_deltas[-1] = np.dot(delta, activations_per_layer[-2].T)
+    biases_gradients_deltas[-1] = delta
+    for i, layer in enumerate(reversed(self.layers[1:-1])):
+      delta = np.dot(self.layers[-i-1].weights.T, delta)
+      delta *= layer.activation_function.derivative(weighted_inputs_per_layer[-i-2])
+      weights_gradients_deltas[-i-2] = np.dot(delta, activations_per_layer[-i-3].T)
+      biases_gradients_deltas[-i-2] = delta
+    return (weights_gradients_deltas, biases_gradients_deltas)
+
+
+  def validate(self, validation_data):
+    pass
+
 
   def __repr__(self):
     representation = ""
@@ -56,15 +185,16 @@ class FeedForwardModel:
       representation += layer.__repr__()
     return representation
 
-def main():
-  model = FeedForwardModel([
-    Layer(8),
-    Layer(16, sigmoid),
-    Layer(2, sigmoid)
-  ])
-  print(model)
 
-  model.feedforward(np.random.randn(8,1))
+def main():
+  model = FeedForwardModel(
+    [Layer(8),
+     Layer(16, SigmoidActivation),
+     Layer(32, SigmoidActivation),
+     Layer(2, SoftmaxActivation)],
+    CrossEntropyLoss)
+
+  print(model.feedforward(np.random.randn(8,1)))
 
 if __name__ == '__main__':
   main()
