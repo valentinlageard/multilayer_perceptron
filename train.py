@@ -1,4 +1,5 @@
 from FeedForwardModel import *
+import plotly.graph_objects as go
 
 def main():
   try:
@@ -32,6 +33,25 @@ def main():
 
   with open('trained_model.pkl', 'wb') as f:
     pickle.dump(model, f)
+    print(f"Model saved to 'trained_model.pkl'")
+  
+  # Plot training and validation loss and accuracy
+  fig = go.Figure()
+
+  x = np.arange(0, len(model.training_loss_history))
+
+  fig.add_trace(go.Scatter(x=x, y=model.training_loss_history, name='Training loss'))
+  fig.add_trace(go.Scatter(x=x, y=model.validation_loss_history, name='Validation loss'))
+  fig.show()
+
+  fig = go.Figure()
+
+  x = np.arange(0, len(model.training_accuracy_history))
+
+  fig.add_trace(go.Scatter(x=x, y=model.training_accuracy_history, name='Training accuracy'))
+  fig.add_trace(go.Scatter(x=x, y=model.validation_accuracy_history, name='Validation accuracy'))
+  fig.show()
+
 
 if __name__ == "__main__":
   main()
