@@ -10,3 +10,9 @@ Supports:
 - Early stopping with patience hyperparameter.
 
 Example programs are given to be used on real fine needle aspiration biopsy data. The example model is trained to distinguish between cancerous and benign cells.
+
+Usage:
+- `pip install -r requirements.txt`
+- `python3 prepare_data.py`
+- `python3 train.py`
+- `python3 predict.py`
