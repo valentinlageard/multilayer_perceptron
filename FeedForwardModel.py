@@ -20,8 +20,8 @@ class SoftmaxActivation:
   
   @staticmethod
   def derivative(z):
-    I = np.eye(z.shape[0])
-    return SoftmaxActivation.function(z) * (I - SoftmaxActivation.function(z).T)
+    identity = np.eye(z.shape[0])
+    return SoftmaxActivation.function(z) * (identity - SoftmaxActivation.function(z).T)
 
 
 class QuadraticLoss:
@@ -71,11 +71,14 @@ class FeedForwardModel:
     for i, layer in enumerate(layers[1:]):
       layer.weights = np.random.randn(layer.size, layers[i].size)
       layer.biases = np.random.randn(layer.size, 1)
-    # Store them in the model
     self.layers = layers
     self.cost_function = cost_function
 
-
+    self.training_loss_history = []
+    self.validation_loss_history = []
+    self.training_accuracy_history = []
+    self.validation_accuracy_history = []
+    
   def feedforward(self, input_activations):
     activations = input_activations
     for i, layer in enumerate(self.layers[1:]):
@@ -84,7 +87,7 @@ class FeedForwardModel:
 
 
   def stochastic_gradient_descent(self, training_data, validation_data=None, learning_rate=0.01, batch_size=8, epochs=100):
-    for _ in range(epochs):
+    for epoch in range(epochs):
       # Prepare batches
       inputs, outputs = training_data
       n_examples = len(inputs)
@@ -93,16 +96,28 @@ class FeedForwardModel:
       outputs = outputs[permutation_indices]
       batches = [(inputs[i:i+batch_size], outputs[i:i+batch_size]) for i in range(0, n_examples, batch_size)]
 
-      # Apply stochastic batch gradient descent using backpropagation for each batch
+      # Apply gradient descent on each batch
       for batch in batches:
         self.gradient_descent(batch, learning_rate)
 
-      # Validate model
+      # Compute validation metrics and store results
       if validation_data:
-        self.validate(validation_data)
+        validation_loss, validation_accuracy = self.validate(validation_data)
+        self.validation_loss_history.append(validation_loss)
+        self.validation_accuracy_history.append(validation_accuracy)
+
+      # Compute training metrics and store results
+      training_loss, training_accuracy = self.validate(training_data)
+      self.training_loss_history.append(training_loss)
+      self.training_accuracy_history.append(training_accuracy)
+      if validation_data:
+        print(f'Epoch {epoch:03}/{epochs:03} | Training loss: {self.training_loss_history[-1]:.4f}, Validation loss: {self.validation_accuracy_history[-1]:.4f}, Training accuracy: {self.training_accuracy_history[-1]:.4f}, Validation accuracy: {self.validation_accuracy_history[-1]:.4f}')
+      else:
+        print(f'Epoch {epoch:03}/{epochs:03} | Training loss: {self.training_loss_history[-1]:.4f}, Training accuracy: {self.training_accuracy_history[-1]:.4f}')
+
 
   def gradient_descent(self, training_data, learning_rate, validation_data=None, epochs=1):
-    for _ in range(epochs):
+    for epoch in range(epochs):
       # Initialize accumulators to store estimated gradients
       weigths_gradients_accumulators = [np.zeros(layer.weights.shape) for layer in self.layers[1:]]
       biases_gradients_accumulators = [np.zeros(layer.biases.shape) for layer in self.layers[1:]]
@@ -112,16 +127,11 @@ class FeedForwardModel:
         # Compute gradients deltas
         weights_gradients_deltas, biases_gradients_deltas = self.backpropagate(example)
 
-        # Accumulate gradients
+        # Accumulate gradients deltas over each sample in training data
         for weights_gradients_accumulator, weights_gradients_delta in zip(weigths_gradients_accumulators, weights_gradients_deltas):
           weights_gradients_accumulator += weights_gradients_delta
         for biases_gradients_accumulator, biases_gradients_delta in zip(weigths_gradients_accumulators, biases_gradients_deltas):
           biases_gradients_accumulator += biases_gradients_delta
-        
-        example_input, example_result = example
-        example_input = example_input.reshape(len(example_input), 1)
-        example_result = example_result.reshape(len(example_result), 1)
-        print(self.cost_function.function(self.feedforward(example_input), example_result))
 
       # Update weights and biases based on gradients
       for layer, weights_gradients, biases_gradients in zip(self.layers[1:], weigths_gradients_accumulators, biases_gradients_accumulators):
@@ -129,18 +139,28 @@ class FeedForwardModel:
         layer.weights -= weights_gradients * scaled_learning_rate
         layer.biases -= biases_gradients * scaled_learning_rate
       
-      # Validate model
+      # Compute validation metrics and store results
       if validation_data:
-        self.validate(validation_data)
+        validation_loss, validation_accuracy = self.validate(validation_data)
+        self.validation_loss_history.append(validation_loss)
+        self.validation_accuracy_history.append(validation_accuracy)
+
+      # Compute training metrics and store results
+      if epochs != 1:
+        training_loss, training_accuracy = self.validate(training_data)
+        self.training_loss_history.append(training_loss)
+        self.training_accuracy_history.append(training_accuracy)
+        if validation_data:
+          print(f'Epoch {epoch:03}/{epochs:03} | Training loss: {self.training_loss_history[-1]:.4f}, Validation loss: {self.validation_accuracy_history[-1]:.4f}, Training accuracy: {self.training_accuracy_history[-1]:.4f}, Validation accuracy: {self.validation_accuracy_history[-1]:.4f}')
+        else:
+          print(f'Epoch {epoch:03}/{epochs:03} | Training loss: {self.training_loss_history[-1]:.4f}, Training accuracy: {self.training_accuracy_history[-1]:.4f}')
 
 
   def backpropagate(self, example):
-    # Initialized gradients
     example_input, example_result = example
-    example_input = example_input.reshape(len(example_input), 1)
-    example_result = example_result.reshape(len(example_result), 1)
-    # print(f"example_input: {example_input}")
-    # print(f"example_result: {example_result}")
+    example_input = example_input.reshape(-1, 1)
+    example_result = example_result.reshape(-1, 1)
+    # Initialized gradients caches
     weights_gradients_deltas = [np.zeros(layer.weights.shape) for layer in self.layers[1:]]
     biases_gradients_deltas = [np.zeros(layer.biases.shape) for layer in self.layers[1:]]
 
@@ -148,25 +168,27 @@ class FeedForwardModel:
     activations = example_input
     activations_per_layer = [activations] # activation cache for each layer
     weighted_inputs_per_layer = [] # weighted inputs cache for each non-input layer
+    # Feedforward the model but cache activations and weighted inputs per layer
     for layer in self.layers[1:]:
-      # Activate each layer and cache the activation and weighted inputs 
       activations, weighted_inputs = layer.activate(activations, with_weighted_inputs=True)
       activations_per_layer.append(activations)
       weighted_inputs_per_layer.append(weighted_inputs)
 
 
     # Backward pass
+    # Compute the gradient of the cost function with respect to the output layer
     delta = self.cost_function.derivative(activations_per_layer[-1], example_result)
-    # print(f"delta shape before: {delta.shape}")
-    # print(f"last activation derivative shape{self.layers[-1].activation_function.derivative(weighted_inputs_per_layer[-1]).shape}")
+
+    # Compute and store the gradient of the cost function with respect to the weighted inputs of the output layer
     output_dadz = self.layers[-1].activation_function.derivative(weighted_inputs_per_layer[-1])
     if output_dadz.shape[1] == 1:
       delta *= output_dadz
     else:
       delta = np.sum(delta * output_dadz, axis=0).reshape(-1,1)
-    # print(f"delta shape: {delta.shape}")
     weights_gradients_deltas[-1] = np.dot(delta, activations_per_layer[-2].T)
     biases_gradients_deltas[-1] = delta
+
+    # Compute and store the gradients of each hidden layers 
     for i, layer in enumerate(reversed(self.layers[1:-1])):
       delta = np.dot(self.layers[-i-1].weights.T, delta)
       delta *= layer.activation_function.derivative(weighted_inputs_per_layer[-i-2])
@@ -175,26 +197,26 @@ class FeedForwardModel:
     return (weights_gradients_deltas, biases_gradients_deltas)
 
 
-  def validate(self, validation_data):
-    pass
+  def validate(self, data):
+    # Compute average loss
+    losses = [self.cost_function.function(self.feedforward(example_input.reshape(-1, 1)), example_output.reshape(-1,1)) for example_input, example_output in zip(*data)]
+    average_loss = sum(losses) / len(losses)
 
+    # Compute accuracy
+    successes = 0
+    failures = 0
+    for example_input, example_output in zip(*data):
+      example_input = example_input.reshape(-1,1)
+      example_output = example_output.reshape(-1,1)
+      prediction = self.feedforward(example_input.reshape(-1, 1))
+      if np.unravel_index(np.argmax(prediction, axis=None), prediction.shape) == np.unravel_index(np.argmax(example_output, axis=None), example_output.shape):
+        successes += 1
+      else:
+        failures += 1
+    return average_loss, successes / (successes + failures)
 
   def __repr__(self):
     representation = ""
     for layer in self.layers:
       representation += layer.__repr__()
     return representation
-
-
-def main():
-  model = FeedForwardModel(
-    [Layer(8),
-     Layer(16, SigmoidActivation),
-     Layer(32, SigmoidActivation),
-     Layer(2, SoftmaxActivation)],
-    CrossEntropyLoss)
-
-  print(model.feedforward(np.random.randn(8,1)))
-
-if __name__ == '__main__':
-  main()
