@@ -1,5 +1,6 @@
 import numpy as np
 import pickle
+import copy
 
 
 class SigmoidActivation:
@@ -74,6 +75,7 @@ class FeedForwardModel:
     self.layers = layers
     self.cost_function = cost_function
 
+    self.layers_history = []
     self.training_loss_history = []
     self.validation_loss_history = []
     self.training_accuracy_history = []
@@ -86,8 +88,11 @@ class FeedForwardModel:
     return activations
 
 
-  def stochastic_gradient_descent(self, training_data, validation_data=None, learning_rate=0.01, batch_size=8, epochs=100):
+  def stochastic_gradient_descent(self, training_data, validation_data=None, learning_rate=0.01, batch_size=8, epochs=100, patience=0):
     for epoch in range(epochs):
+      if patience > 0:
+        self.layers_history.append(copy.deepcopy(self.layers))
+
       # Prepare batches
       inputs, outputs = training_data
       n_examples = len(inputs)
@@ -111,13 +116,24 @@ class FeedForwardModel:
       self.training_loss_history.append(training_loss)
       self.training_accuracy_history.append(training_accuracy)
       if validation_data:
-        print(f'Epoch {epoch:03}/{epochs:03} | Training loss: {self.training_loss_history[-1]:.4f}, Validation loss: {self.validation_accuracy_history[-1]:.4f}, Training accuracy: {self.training_accuracy_history[-1]:.4f}, Validation accuracy: {self.validation_accuracy_history[-1]:.4f}')
+        print(f'Epoch {epoch:03}/{epochs:03} | Training loss: {self.training_loss_history[-1]:.4f}, Validation loss: {self.validation_loss_history[-1]:.4f}, Training accuracy: {self.training_accuracy_history[-1]:.4f}, Validation accuracy: {self.validation_accuracy_history[-1]:.4f}')
       else:
         print(f'Epoch {epoch:03}/{epochs:03} | Training loss: {self.training_loss_history[-1]:.4f}, Training accuracy: {self.training_accuracy_history[-1]:.4f}')
 
+      # Early stopping
+      if self.early_stopping_test(patience):
+        print(f"Early stopping at epoch {epoch} due to validation loss increase over the last {patience} epochs.")
+        print(f"Rewinding to epoch {epoch-patience} and returning the model to that state.")
+        self.layers_history.append(copy.deepcopy(self.layers))
+        self.layers = self.layers_history[-patience-1]
+        break
 
-  def gradient_descent(self, training_data, learning_rate, validation_data=None, epochs=1):
+
+  def gradient_descent(self, training_data, learning_rate, validation_data=None, epochs=1, patience=0):
     for epoch in range(epochs):
+      if patience > 0:
+        self.layers_history.append(copy.deepcopy(self.layers))
+
       # Initialize accumulators to store estimated gradients
       weigths_gradients_accumulators = [np.zeros(layer.weights.shape) for layer in self.layers[1:]]
       biases_gradients_accumulators = [np.zeros(layer.biases.shape) for layer in self.layers[1:]]
@@ -151,9 +167,16 @@ class FeedForwardModel:
         self.training_loss_history.append(training_loss)
         self.training_accuracy_history.append(training_accuracy)
         if validation_data:
-          print(f'Epoch {epoch:03}/{epochs:03} | Training loss: {self.training_loss_history[-1]:.4f}, Validation loss: {self.validation_accuracy_history[-1]:.4f}, Training accuracy: {self.training_accuracy_history[-1]:.4f}, Validation accuracy: {self.validation_accuracy_history[-1]:.4f}')
+          print(f'Epoch {epoch:03}/{epochs:03} | Training loss: {self.training_loss_history[-1]:.4f}, Validation loss: {self.validation_loss_history[-1]:.4f}, Training accuracy: {self.training_accuracy_history[-1]:.4f}, Validation accuracy: {self.validation_accuracy_history[-1]:.4f}')
         else:
           print(f'Epoch {epoch:03}/{epochs:03} | Training loss: {self.training_loss_history[-1]:.4f}, Training accuracy: {self.training_accuracy_history[-1]:.4f}')
+      
+      if self.early_stopping_test(patience):
+        print(f"Early stopping at epoch {epoch} due to validation loss increase over the last {patience} epochs.")
+        print(f"Rewinding to epoch {epoch-patience} and returning the model to that state.")
+        self.layers_history.append(copy.deepcopy(self.layers))
+        self.layers = self.layers_history[-patience-1]
+        break
 
 
   def backpropagate(self, example):
@@ -214,7 +237,14 @@ class FeedForwardModel:
       else:
         failures += 1
     return average_loss, successes / (successes + failures)
-
+  
+  def early_stopping_test(self, patience=0):
+    if patience > 0 and self.validation_loss_history and len(self.validation_loss_history) > patience * 2:
+      average_loss_before_patience = sum(self.validation_loss_history[-patience*2:-patience]) / patience
+      average_loss_after_patience = sum(self.validation_loss_history[-patience:]) / patience
+      return average_loss_after_patience > average_loss_before_patience
+    return False
+  
   def __repr__(self):
     representation = ""
     for layer in self.layers:
