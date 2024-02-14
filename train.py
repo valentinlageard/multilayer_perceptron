@@ -19,9 +19,9 @@ def main():
   model = FeedForwardModel(
     [Layer(training_data[0].shape[1]),
       Layer(20, SigmoidActivation),
-      Layer(20, SigmoidActivation),
-      Layer(training_data[1].shape[1], SigmoidActivation)],
-    QuadraticLoss)
+      Layer(10, SigmoidActivation),
+      Layer(training_data[1].shape[1], SoftmaxActivation)],
+    CrossEntropyLoss)
 
   model.stochastic_gradient_descent(
     training_data,
@@ -29,7 +29,7 @@ def main():
     batch_size=16,
     epochs=100,
     learning_rate=0.1,
-    patience=5)
+    patience=15)
 
   with open('trained_model.pkl', 'wb') as f:
     pickle.dump(model, f)
