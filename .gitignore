@@ -1,3 +1,6 @@
 .ipynb_checkpoints
 data_exploration.ipynb
 __pycache__
+trained_model.pkl
+training_data.pkl
+validation_data.pkl
